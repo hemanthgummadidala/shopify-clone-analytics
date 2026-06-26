@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext.js';
 import { CartProvider } from './context/CartContext.js';
 import { RouterProvider, Route, useRouter } from './components/Router.js';
@@ -39,7 +39,29 @@ const AppContent: React.FC = () => {
   const { user, loading } = useAuth();
   const { path, navigate } = useRouter();
 
-  React.useEffect(() => {
+  // State to hold user intent popup configuration map
+  const [popupData, setPopupData] = useState({ shouldShow: false, title: '', message: '', couponCode: '' });
+
+  useEffect(() => {
+    // 1. Resolve browser persistent identification identity
+    let userPseudoId = localStorage.getItem('user_pseudo_id');
+    if (!userPseudoId) {
+      userPseudoId = 'usr_' + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('user_pseudo_id', userPseudoId);
+    }
+
+    // 2. Dispatch profile context lookup to the correct matching server route handler
+    fetch(`http://localhost:5000/api/analytics/user-popup-intent/${userPseudoId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.popup.shouldShow) {
+          setPopupData(data.popup);
+        }
+      })
+      .catch((err) => console.error('Landing user intent profile synchronization failure:', err));
+  }, []);
+    
+  useEffect(() => {
     const pathname = path.split('?')[0];
     if (!loading) {
       if (!user && pathname !== '/auth') {
@@ -59,7 +81,7 @@ const AppContent: React.FC = () => {
     );
   }
 
-  // Render-time guard: if not authenticated, render Auth screen on all routes to block storefront flashes
+  // Render-time guard layout path configuration to block authentication flashes
   if (!user) {
     return (
       <div className="flex flex-col min-h-screen bg-[#fcfcfc]">
@@ -91,6 +113,29 @@ const AppContent: React.FC = () => {
         <Route path="/admin" element={<AdminDashboard />} />
       </main>
       <Footer />
+      
+      {/* Real-time Intent Targeted Popup Modal */}
+      {popupData.shouldShow && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999 }}>
+          <div style={{ backgroundColor: '#fff', padding: '35px', borderRadius: '12px', maxWidth: '440px', width: '90%', textAlign: 'center', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+            <h2 style={{ fontSize: '24px', marginBottom: '12px', fontWeight: 'bold', color: '#000' }}>{popupData.title}</h2>
+            <p style={{ color: '#4b5563', fontSize: '15px', lineHeight: '1.6', marginBottom: '24px' }}>{popupData.message}</p>
+            
+            {popupData.couponCode && (
+              <div style={{ border: '2px dashed #000', backgroundColor: '#f9fafb', padding: '12px', fontSize: '20px', fontWeight: 'bold', letterSpacing: '2px', marginBottom: '24px', color: '#000' }}>
+                {popupData.couponCode}
+              </div>
+            )}
+
+            <button 
+              onClick={() => setPopupData({ ...popupData, shouldShow: false })}
+              style={{ backgroundColor: '#000', color: '#fff', border: 'none', padding: '12px 32px', borderRadius: '6px', fontSize: '15px', fontWeight: '600', cursor: 'pointer', width: '100%' }}
+            >
+              Claim Offer & Shop
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

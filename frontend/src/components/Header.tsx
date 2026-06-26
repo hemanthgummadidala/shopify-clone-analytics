@@ -42,6 +42,8 @@ export const Header: React.FC = () => {
           <form onSubmit={handleSearchSubmit} className="hidden md:flex items-center max-w-md w-full relative">
             <input
               type="text"
+              id="search"
+              name="search"
               placeholder="Search premium products..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}

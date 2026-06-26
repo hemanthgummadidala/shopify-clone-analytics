@@ -44,14 +44,16 @@ export const ProductDetails: React.FC = () => {
         // Replace 'user?.id' or '2' with your active application state variable
         const activeUserId = localStorage.getItem('shopify_user_id') || '2'; 
         
-        fetch(`${API_BASE}/track/track-action`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            userId: parseInt(activeUserId), 
-            actionName: 'view_item' 
-          })
-        }).catch(err => console.error("Telemetry failed to send:", err));
+        // Change this line to include /api right after API_BASE
+       // Remove the extra /api since API_BASE already has it built-in!
+       fetch(`${API_BASE}/analytics/track-action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId: parseInt(activeUserId), 
+          actionName: 'view_item' 
+        })
+      }).catch(err => console.error("Telemetry failed to send:", err));
 
         // Track recently viewed products in local storage
         const viewedStr = localStorage.getItem('shopify_recently_viewed');

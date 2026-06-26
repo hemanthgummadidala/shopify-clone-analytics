@@ -201,6 +201,7 @@ export async function analyzeUserSessionWithAI(sessionId: string): Promise<Sessi
 export async function getIntentScoreForUser(userPseudoId: string): Promise<any> {
   const { bigquery } = require('./bigqueryClient.js');
 
+  // SQL Query to pull historical events for the user
   const query = `
     SELECT 
       user_pseudo_id, 
@@ -214,25 +215,14 @@ export async function getIntentScoreForUser(userPseudoId: string): Promise<any> 
 
   const options = {
     query: query,
-    params: { userPseudoId: userPseudoId },
+    params: { userPseudoId },
   };
 
   try {
     const [rows] = await bigquery.query(options);
-    console.log("BigQuery pulled lifetime logs for User: " + userPseudoId);
-    
-    if (!rows || rows.length === 0) {
-      return { success: true, intentScore: 50, summary: "No history found for user." };
-    }
-
-    return {
-      success: true,
-      userPseudoId,
-      totalEvents: rows.length,
-      rawData: rows
-    };
+    return { success: true, totalEvents: rows.length, rawData: rows };
   } catch (error: any) {
-    console.error("BigQuery User History Fetch Failed: ", error);
-    return { success: false, intentScore: 0, summary: error.message };
+    console.error("BigQuery Extraction Failure: ", error);
+    return { success: false, totalEvents: 0, rawData: [] };
   }
 }

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth, API_BASE } from '../context/AuthContext.js';
 import { useRouter } from '../components/Router.js';
 import { Order, Product } from '../types.js';
-import { User, ShoppingBag, Eye, Calendar, Package, ChevronDown, ChevronUp, Lock } from 'lucide-react';
+import { User, ShoppingBag, Eye, Package, ChevronDown, ChevronUp, Lock } from 'lucide-react';
 
 export const Dashboard: React.FC = () => {
   const { user, apiFetch } = useAuth();
@@ -14,62 +14,10 @@ export const Dashboard: React.FC = () => {
   const [loadingOrders, setLoadingOrders] = useState<boolean>(true);
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
 
-  // Profile Settings form demonstration
+  // Tab and profile settings form states
   const [activeTab, setActiveTab] = useState<'orders' | 'profile'>('orders');
   const [name, setName] = useState(user?.name || '');
   const [settingsSuccess, setSettingsSuccess] = useState<string>('');
-  const [intentScore, setIntentScore] = useState<number | null>(null);
-  const [aiSummary, setAiSummary] = useState<string>('');
-  const [analyticsError, setAnalyticsError] = useState<string>('');
-  const [loadingAnalytics, setLoadingAnalytics] = useState<boolean>(false);
-  const [useAI, setUseAI] = useState<boolean>(false);
-
-  const loadSessionAnalytics = async () => {
-    try {
-      setLoadingAnalytics(true);
-      setAnalyticsError('');
-      setAiSummary('');
-      setIntentScore(null);
-
-      let currentSessionId = localStorage.getItem('shopify_session_id') || localStorage.getItem('ga4_session_id');
-      if (!currentSessionId && user) {
-        currentSessionId = `ga4_sid_${user.id}`;
-      }
-
-      if (!currentSessionId) {
-        setAnalyticsError('No session ID found. Login again or refresh the page.');
-        return;
-      }
-
-      const path = useAI ? '/analytics/analyze/ai' : '/analytics/analyze';
-      const res = await fetch(`${API_BASE}${path}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ sessionId: currentSessionId })
-      });
-
-      if (!res.ok) {
-        const body = await res.text();
-        setAnalyticsError(`Analytics request failed (${res.status}). Backend may be unavailable.`);
-        console.error('Analytics error response:', body);
-        return;
-      }
-
-      const data = await res.json();
-      setIntentScore(data.intentScore);
-      setAiSummary(data.summary);
-      if (!data.success) {
-        setAnalyticsError('Analytics service returned no data. Please check your backend deployment.');
-      }
-    } catch (error: any) {
-      console.error('Failed to communicate with the session analytics engine:', error);
-      setAnalyticsError(`Analytics fetch failed: ${error.message || error}`);
-    } finally {
-      setLoadingAnalytics(false);
-    }
-  };
 
   useEffect(() => {
     if (!user) {
@@ -96,11 +44,9 @@ export const Dashboard: React.FC = () => {
           const viewedIds: number[] = JSON.parse(viewedStr);
           if (viewedIds.length === 0) return;
 
-          // Fetch all products and filter for viewed ones to avoid multiple parallel API requests
           const res = await fetch(`${API_BASE}/products`);
           if (res.ok) {
             const allProducts: Product[] = await res.json();
-            // Filter and preserve order of recently viewed list
             const filtered = viewedIds
               .map(id => allProducts.find(p => p.id === id))
               .filter((p): p is Product => !!p);
@@ -114,8 +60,7 @@ export const Dashboard: React.FC = () => {
 
     fetchOrderHistory();
     loadRecentlyViewed();
-    loadSessionAnalytics();
-  }, [user, useAI]);
+  }, [user]);
 
   const toggleOrder = (orderId: number) => {
     setExpandedOrder(prev => (prev === orderId ? null : orderId));
@@ -128,12 +73,11 @@ export const Dashboard: React.FC = () => {
   };
 
   if (!user) {
-    return null; // Redirect is handled in useEffect
+    return null;
   }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-
 
       {/* Top Banner - Welcome User */}
       <section className="bg-gradient-to-tr from-gray-900 via-indigo-950 to-indigo-900 rounded-[35px] text-white p-8 sm:p-12 shadow-xl border border-gray-800 flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
@@ -151,70 +95,6 @@ export const Dashboard: React.FC = () => {
           Account Status: Active
         </span>
       </section>
-
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="text-sm text-slate-700">
-          Analytics mode: <span className="font-semibold">{useAI ? 'AI-enhanced summary' : 'Heuristic analysis'}</span>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setUseAI(prev => !prev)}
-            className="px-4 py-2 rounded-2xl bg-indigo-600 text-white text-xs font-bold uppercase tracking-wide hover:bg-indigo-700 transition"
-          >
-            Switch to {useAI ? 'Heuristic' : 'AI'}
-          </button>
-          <button
-            type="button"
-            onClick={loadSessionAnalytics}
-            className="px-4 py-2 rounded-2xl bg-white border border-indigo-100 text-indigo-600 text-xs font-bold uppercase tracking-wide hover:bg-indigo-50 transition"
-          >
-            Refresh analytics
-          </button>
-        </div>
-      </div>
-
-      {loadingAnalytics ? (
-        <div className="mb-6 bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-100 p-5 rounded-[24px] flex items-center justify-between gap-4 shadow-sm">
-          <div className="flex items-center space-x-3">
-            <div className="bg-indigo-600 p-2 rounded-xl text-white font-bold text-xs">⏳</div>
-            <div>
-              <span className="block text-[10px] font-black uppercase tracking-wider text-indigo-600">Session analytics</span>
-              <p className="text-sm font-semibold text-slate-800 italic mt-0.5">Analyzing your session activity and calculating intent score…</p>
-            </div>
-          </div>
-        </div>
-      ) : analyticsError ? (
-        <div className="mb-6 bg-rose-50 border border-rose-200 p-5 rounded-[24px] shadow-sm text-rose-700">
-          <div className="flex items-start gap-3">
-            <div className="mt-1 text-xl">⚠️</div>
-            <div>
-              <p className="text-xs font-black uppercase tracking-wider">Analytics error</p>
-              <p className="mt-2 text-sm font-semibold">{analyticsError}</p>
-              <p className="mt-2 text-xs text-rose-600/80">Check your deployed backend API URL, ensure /api routes are reachable, and redeploy the frontend if needed.</p>
-            </div>
-          </div>
-        </div>
-      ) : aiSummary ? (
-        <div className="mb-6 bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-100 p-5 rounded-[24px] flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
-          <div className="flex items-start space-x-3">
-            <div className="bg-indigo-600 p-2 rounded-xl text-white font-bold text-xs">✨</div>
-            <div>
-              <span className="block text-[10px] font-black uppercase tracking-wider text-indigo-600">Personalized Session Update</span>
-              <p className="text-sm font-semibold text-slate-800 italic mt-0.5">
-                "{aiSummary}"
-              </p>
-            </div>
-          </div>
-          
-          {intentScore !== null && (
-            <div className="bg-white px-4 py-2 rounded-xl border border-indigo-100 text-right min-w-[120px]">
-              <span className="text-[9px] font-black tracking-wider uppercase text-indigo-500 block">Intent Score</span>
-              <div className="text-2xl font-black text-slate-800 mt-0.5">{intentScore}/100</div>
-            </div>
-          )}
-        </div>
-      ) : null}
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         
@@ -303,11 +183,7 @@ export const Dashboard: React.FC = () => {
                             <div>
                               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Status</span>
                               <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                                order.status === 'completed'
-                                  ? 'bg-emerald-50 text-emerald-700'
-                                  : order.status === 'cancelled'
-                                  ? 'bg-rose-50 text-rose-700'
-                                  : 'bg-indigo-50 text-indigo-700'
+                                order.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : order.status === 'cancelled' ? 'bg-rose-50 text-rose-700' : 'bg-indigo-50 text-indigo-700'
                               }`}>
                                 {order.status}
                               </span>

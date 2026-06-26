@@ -102,13 +102,15 @@ export const Auth: React.FC = () => {
             )}
 
             <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Email Address</label>
+            <label htmlFor="email" className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Email Address</label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
                   <Mail className="h-5 w-5" />
                 </span>
                 <input
                   type="email"
+                  id="email"
+                  name="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -120,19 +122,21 @@ export const Auth: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Password</label>
+            <label htmlFor="password" className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Password</label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
                   <Lock className="h-5 w-5" />
                 </span>
                 <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete={isLogin ? "current-password" : "new-password"}
-                  className="block w-full pl-10 pr-3 py-3 border border-gray-200 rounded-2xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
-                  placeholder="••••••••"
+                 type="password"
+                 id="password"
+                 name="password"
+                 required
+                 value={password}
+                 onChange={(e) => setPassword(e.target.value)}
+                 autoComplete="current-password"
+                 className="block w-full pl-10 pr-3 py-3 border border-gray-200 rounded-2xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm"
+                 placeholder="••••••••"
                 />
               </div>
             </div>
