@@ -19,13 +19,15 @@ app.use(cors());
 app.use(express.json());
 
 // Routes mapping
+// Routes mapping
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
-// Change these two lines to separate their paths:
-app.use('/api/analytics/tracking', trackingRoutes);
-app.use('/api/analytics/scores', scoringEngineRoutes);
+
+// Isolated route mapping to prevent route collisions
+app.use('/api/tracking', trackingRoutes);
+app.use('/api/analytics', scoringEngineRoutes);
 
 // Base API Health Check Endpoint
 app.get('/', (req, res) => {

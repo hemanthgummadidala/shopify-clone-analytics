@@ -51,7 +51,7 @@ const AppContent: React.FC = () => {
     }
 
     // 2. Dispatch profile context lookup to the correct matching server route handler with unique namespace tracking route path
-    fetch(`https://shopify-clone-backend-8awt.onrender.com/api/analytics/tracking/user-popup-intent/${userPseudoId}`)
+    fetch(`https://shopify-clone-backend-8awt.onrender.com/api/tracking/user-popup-intent/${userPseudoId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.success && data.popup && data.popup.shouldShow) {
