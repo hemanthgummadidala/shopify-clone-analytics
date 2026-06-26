@@ -1,16 +1,10 @@
-import { BigQuery } from '@google-cloud/bigquery';
 import express, { Request, Response } from 'express';
+import { bigquery, BQ_DATE_SUFFIX, eventsTableRef } from '../bigqueryClient';
 
 const router = express.Router();
 
-// 1. Initialize the Google BigQuery Client
-const bigquery = new BigQuery({
-  projectId: 'shopify-clone-499604',
-  keyFilename: './config/gcp-service-account-key.json' 
-});
-
-// 2. GET API: Fetch session intent metrics and willingness statuses
-router.get('/api/session-intent-scores', async (req: Request, res: Response) => {
+// GET API: Fetch session intent metrics from your GA4 BigQuery export
+router.get('/session-intent-scores', async (req: Request, res: Response) => {
   const sqlQuery = `
     WITH SessionMetrics AS (
       SELECT
@@ -22,8 +16,8 @@ router.get('/api/session-intent-scores', async (req: Request, res: Response) => 
         COUNTIF(event_name = 'add_to_cart') AS cart_adds,
         COUNTIF(event_name = 'begin_checkout') AS checkout_starts,
         COUNTIF(event_name = 'purchase') AS purchases
-      FROM \`bigquery-public-data.ga4_obfuscated_sample_ecommerce.events_*\`
-      WHERE _TABLE_SUFFIX BETWEEN '20201201' AND '20201231'
+      FROM ${eventsTableRef()}
+      WHERE _TABLE_SUFFIX = @dateSuffix
       GROUP BY user_pseudo_id, ga_session_id
       HAVING ga_session_id IS NOT NULL
     ),
@@ -53,12 +47,11 @@ router.get('/api/session-intent-scores', async (req: Request, res: Response) => 
   `;
 
   try {
-    const options = {
+    const [rows] = await bigquery.query({
       query: sqlQuery,
+      params: { dateSuffix: BQ_DATE_SUFFIX },
       location: 'US',
-    };
-
-    const [rows] = await bigquery.query(options);
+    });
     
     res.status(200).json({
       success: true,

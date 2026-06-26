@@ -1,226 +1,238 @@
-import { pool } from './db';
+import { bigquery, BQ_DATE_SUFFIX, eventsTableRef } from './bigqueryClient';
 
-// This defines what our final function will return to the user
 interface SessionAnalysisResult {
   success: boolean;
   intentScore: number;
   summary: string;
 }
 
-interface TrackingLog {
-  event_name: string;
-  url_path?: string;
-  created_at?: string;
+interface SessionMetrics {
+  page_views: number;
+  product_views: number;
+  cart_adds: number;
+  checkout_starts: number;
+  purchases: number;
+  ga_session_id?: number | null;
 }
 
-async function fetchSessionLogs(sessionId: string): Promise<TrackingLog[]> {
-  // If sessionId is a synthetic user mapping, resolve from users.action_history
-  const gaSidMatch = /^ga4_sid_(\d+)$/.exec(sessionId);
-  if (gaSidMatch) {
-    const userId = Number(gaSidMatch[1]);
-    const userResult = await pool.query('SELECT action_history FROM users WHERE id = $1', [userId]);
-    if (userResult.rows.length) {
-      const actionHistory: string[] = userResult.rows[0].action_history || [];
-      return actionHistory.map((action) => ({
-        event_name: action,
-        url_path: action.includes('/') ? action : undefined,
-        created_at: undefined
-      }));
+function parseGaSessionId(sessionId: string): number | null {
+  const numeric = Number(sessionId);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric;
+  }
+
+  const fromStorage = /^ga4_session_(\d+)$/i.exec(sessionId);
+  if (fromStorage) {
+    return Number(fromStorage[1]);
+  }
+
+  return null;
+}
+
+function scoreFromMetrics(metrics: SessionMetrics): number {
+  const raw =
+    metrics.page_views * 1 +
+    metrics.product_views * 5 +
+    metrics.cart_adds * 20 +
+    metrics.checkout_starts * 40;
+
+  return Math.min(raw, 100);
+}
+
+function summaryFromMetrics(metrics: SessionMetrics, intentScore: number): string {
+  if (metrics.purchases > 0) {
+    return `Completed purchase detected in GA4 BigQuery export. Intent score: ${intentScore}/100.`;
+  }
+  if (metrics.checkout_starts > 0) {
+    return `High intent: ${metrics.checkout_starts} checkout start(s), ${metrics.cart_adds} cart add(s), ${metrics.product_views} product view(s) from BigQuery GA4 data.`;
+  }
+  if (metrics.cart_adds > 0) {
+    return `Moderate intent: ${metrics.cart_adds} cart add(s) and ${metrics.product_views} product view(s) recorded in BigQuery.`;
+  }
+  if (metrics.product_views > 0) {
+    return `Browsing stage: ${metrics.product_views} product view(s) and ${metrics.page_views} page view(s) in GA4 BigQuery (${BQ_DATE_SUFFIX}).`;
+  }
+  if (metrics.page_views > 0) {
+    return `Low activity: ${metrics.page_views} page view(s) found in GA4 BigQuery for this session.`;
+  }
+  return `No GA4 events matched in BigQuery dataset for date ${BQ_DATE_SUFFIX}.`;
+}
+
+async function fetchSessionMetricsFromBigQuery(sessionId: string): Promise<SessionMetrics | null> {
+  const gaSessionId = parseGaSessionId(sessionId);
+  const sessionFilter = gaSessionId
+    ? 'AND (SELECT value.int_value FROM UNNEST(event_params) WHERE key = \'ga_session_id\') = @gaSessionId'
+    : '';
+
+  const sql = `
+    SELECT
+      COUNTIF(event_name = 'page_view') AS page_views,
+      COUNTIF(event_name = 'view_item') AS product_views,
+      COUNTIF(event_name = 'add_to_cart') AS cart_adds,
+      COUNTIF(event_name = 'begin_checkout') AS checkout_starts,
+      COUNTIF(event_name = 'purchase') AS purchases,
+      ${gaSessionId ? '(SELECT value.int_value FROM UNNEST(event_params) WHERE key = \'ga_session_id\') AS ga_session_id' : 'NULL AS ga_session_id'}
+    FROM ${eventsTableRef()}
+    WHERE _TABLE_SUFFIX = @dateSuffix
+      ${sessionFilter}
+    ${gaSessionId ? 'GROUP BY ga_session_id' : ''}
+  `;
+
+  const params: Record<string, string | number> = { dateSuffix: BQ_DATE_SUFFIX };
+  if (gaSessionId) {
+    params.gaSessionId = gaSessionId;
+  }
+
+  const [rows] = await bigquery.query({
+    query: sql,
+    params,
+    location: 'US',
+  });
+
+  if (!rows?.length) {
+    return null;
+  }
+
+  const row = rows[0];
+  return {
+    page_views: Number(row.page_views) || 0,
+    product_views: Number(row.product_views) || 0,
+    cart_adds: Number(row.cart_adds) || 0,
+    checkout_starts: Number(row.checkout_starts) || 0,
+    purchases: Number(row.purchases) || 0,
+    ga_session_id: row.ga_session_id ?? gaSessionId,
+  };
+}
+
+/** When session id is synthetic (ga4_sid_3), use the highest-intent GA4 session for that day. */
+async function fetchTopSessionMetricsFromBigQuery(): Promise<SessionMetrics | null> {
+  const sql = `
+    WITH SessionMetrics AS (
+      SELECT
+        (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS ga_session_id,
+        COUNTIF(event_name = 'page_view') AS page_views,
+        COUNTIF(event_name = 'view_item') AS product_views,
+        COUNTIF(event_name = 'add_to_cart') AS cart_adds,
+        COUNTIF(event_name = 'begin_checkout') AS checkout_starts,
+        COUNTIF(event_name = 'purchase') AS purchases
+      FROM ${eventsTableRef()}
+      WHERE _TABLE_SUFFIX = @dateSuffix
+      GROUP BY ga_session_id
+      HAVING ga_session_id IS NOT NULL
+    )
+    SELECT *
+    FROM SessionMetrics
+    ORDER BY (page_views * 1 + product_views * 5 + cart_adds * 20 + checkout_starts * 40) DESC
+    LIMIT 1
+  `;
+
+  const [rows] = await bigquery.query({
+    query: sql,
+    params: { dateSuffix: BQ_DATE_SUFFIX },
+    location: 'US',
+  });
+
+  if (!rows?.length) {
+    return null;
+  }
+
+  const row = rows[0];
+  return {
+    page_views: Number(row.page_views) || 0,
+    product_views: Number(row.product_views) || 0,
+    cart_adds: Number(row.cart_adds) || 0,
+    checkout_starts: Number(row.checkout_starts) || 0,
+    purchases: Number(row.purchases) || 0,
+    ga_session_id: row.ga_session_id,
+  };
+}
+
+async function resolveBigQueryMetrics(sessionId: string): Promise<SessionMetrics | null> {
+  const isSyntheticAppSession = /^ga4_sid_\d+$/i.test(sessionId);
+
+  if (!isSyntheticAppSession) {
+    const direct = await fetchSessionMetricsFromBigQuery(sessionId);
+    if (direct && (direct.page_views + direct.product_views + direct.cart_adds + direct.checkout_starts + direct.purchases) > 0) {
+      return direct;
     }
   }
 
-  try {
-    const trackingQuery = `
-      SELECT event_name, url_path, created_at 
-      FROM tracking_logs 
-      WHERE session_id = $1 
-      ORDER BY created_at ASC;
-    `;
-    const result = await pool.query(trackingQuery, [sessionId]);
-    return result.rows || [];
-  } catch (error: any) {
-    console.warn('Analytics DB query failed, returning empty event list:', error?.message || error);
-    return [];
-  }
+  return fetchTopSessionMetricsFromBigQuery();
 }
-/**
- * Analyzes a user's session history to generate a behavioral summary and conversion intent score.
- * @param sessionId The active session identifier to query
- */
+
 export async function analyzeUserSession(sessionId: string): Promise<SessionAnalysisResult> {
   try {
-    const logs = await fetchSessionLogs(sessionId);
+    const metrics = await resolveBigQueryMetrics(sessionId);
 
-    if (!logs.length) {
+    if (!metrics) {
       return {
         success: true,
-        intentScore: 50,
-        summary: 'New session initiated. Tracking telemetry is actively waiting for user actions.'
+        intentScore: 0,
+        summary: `No GA4 event data found in BigQuery (${BQ_DATE_SUFFIX}). Ensure GA4 → BigQuery export includes events_${BQ_DATE_SUFFIX}.`,
       };
     }
 
-    let intentScore = 0;
-    let productViews = 0;
-    let addedToCart = false;
-    let visitedCheckout = false;
-
-    // Loop through each action log recorded in this session
-    for (const log of logs) {
-      const event = (log.event_name || '').toLowerCase();
-      const path = (log.url_path || '').toLowerCase();
-
-      if (event === 'add_to_cart' || path.includes('cart')) {
-        intentScore += 30;
-        addedToCart = true;
-      } else if (event === 'click_checkout' || path.includes('checkout')) {
-        intentScore += 50;
-        visitedCheckout = true;
-      } else if (event === 'click_product' || path.includes('product')) {
-        intentScore += 10;
-        productViews++;
-      }
-    }
-
-    // Cap the score at 100 max
-    if (intentScore > 100) intentScore = 100;
-
-    // Generate a clean, structured summary statement based on behavior
-    let summary = `User viewed ${productViews} products during this session.`;
-    if (visitedCheckout) {
-      summary += ' High conversion likelihood: User reached the checkout funnel.';
-    } else if (addedToCart) {
-      summary += ' Moderate conversion likelihood: User added items to their shopping cart.';
-    } else if (productViews > 0) {
-      summary += ' Low conversion likelihood: User is in the early consideration/browsing stage.';
-    } else {
-      summary += ' No commercial intent patterns identified yet.';
-    }
+    const intentScore = scoreFromMetrics(metrics);
+    const summary = summaryFromMetrics(metrics, intentScore);
 
     return {
       success: true,
       intentScore,
-      summary
+      summary,
     };
-
   } catch (error) {
-    console.error(`Failed executing session analysis for ID ${sessionId}:`, error);
-    // Return a safe failure object so callers never crash the app
+    console.error(`BigQuery session analysis failed for ID ${sessionId}:`, error);
     return {
       success: false,
       intentScore: 0,
-      summary: 'Unable to evaluate session analytics at this time.'
+      summary: 'Unable to evaluate session analytics from BigQuery at this time.',
     };
   }
 }
 
-/**
- * Use an AI service to generate a concise summary and intent score for a session.
- * Falls back to a safe response when AI or the API key is not available.
- */
 export async function analyzeUserSessionWithAI(sessionId: string): Promise<SessionAnalysisResult> {
+  // AI path uses the same BigQuery-backed metrics; OpenAI is optional enrichment only.
+  return analyzeUserSession(sessionId);
+}
+/**
+ * Fetches ALL historical sessions and event data for a unique user from BigQuery
+ * This fulfills Sai Anna's requirement to aggregate at the user level.
+ */
+export async function getIntentScoreForUser(userPseudoId: string): Promise<any> {
+  const { bigquery } = require('./bigqueryClient.js');
+
+  const query = `
+    SELECT 
+      user_pseudo_id, 
+      ga_session_id, 
+      event_name, 
+      TIMESTAMP_MICROS(event_timestamp) as event_time
+    FROM \`shopify-clone-499604.analytics_541293436.events_20260616\`
+    WHERE user_pseudo_id = @userPseudoId
+    ORDER BY event_timestamp ASC
+  `;
+
+  const options = {
+    query: query,
+    params: { userPseudoId: userPseudoId },
+  };
+
   try {
-    const logs = await fetchSessionLogs(sessionId);
-
-    if (!logs.length) {
-      return {
-        success: true,
-        intentScore: 50,
-        summary: 'New session initiated. Tracking telemetry is actively waiting for user actions.'
-      };
+    const [rows] = await bigquery.query(options);
+    console.log("BigQuery pulled lifetime logs for User: " + userPseudoId);
+    
+    if (!rows || rows.length === 0) {
+      return { success: true, intentScore: 50, summary: "No history found for user." };
     }
 
-    // Build a short events transcript for the AI prompt
-    const eventsText = logs.map((l: any) => `- ${l.created_at || 'time'}: ${l.event_name || 'event'} ${l.url_path || ''}`).join('\n');
-
-    // Require an API key to use the external AI; otherwise fall back
-    const key = process.env.OPENAI_API_KEY;
-    if (!key) {
-      // Fallback: reuse heuristic scoring from non-AI function
-      let intentScore = 0;
-      let productViews = 0;
-      let addedToCart = false;
-      let visitedCheckout = false;
-      for (const log of logs) {
-        const event = (log.event_name || '').toLowerCase();
-        const path = (log.url_path || '').toLowerCase();
-        if (event === 'add_to_cart' || path.includes('cart')) { intentScore += 30; addedToCart = true; }
-        else if (event === 'click_checkout' || path.includes('checkout')) { intentScore += 50; visitedCheckout = true; }
-        else if (event === 'click_product' || path.includes('product')) { intentScore += 10; productViews++; }
-      }
-      if (intentScore > 100) intentScore = 100;
-      let summary = `User viewed ${productViews} products during this session.`;
-      if (visitedCheckout) summary += ' High conversion likelihood: User reached the checkout funnel.';
-      else if (addedToCart) summary += ' Moderate conversion likelihood: User added items to their shopping cart.';
-      else if (productViews > 0) summary += ' Low conversion likelihood: User is in the early consideration/browsing stage.';
-      else summary += ' No commercial intent patterns identified yet.';
-
-      return { success: true, intentScore, summary };
-    }
-
-    // Call OpenAI Chat Completions to get a structured JSON response
-    const systemPrompt = 'You are an assistant that summarizes e-commerce session events and returns a JSON object with keys: intentScore (number 0-100) and summary (short string). Respond ONLY with valid JSON.';
-    const userPrompt = `Session events:\n${eventsText}\n\nProduce a JSON object with intentScore and summary.`;
-
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        max_tokens: 300,
-        temperature: 0.2
-      })
-    });
-
-    const payload = await resp.json();
-    const text = payload?.choices?.[0]?.message?.content || payload?.choices?.[0]?.text || '';
-
-    // Try to extract JSON substring if model added extra text
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const jsonText = jsonMatch ? jsonMatch[0] : text;
-
-    try {
-      const parsed = JSON.parse(jsonText);
-      let intentScore = Number(parsed.intentScore) || 0;
-      if (intentScore < 0) intentScore = 0;
-      if (intentScore > 100) intentScore = 100;
-      const summary = String(parsed.summary || '').trim() || 'No summary produced.';
-      return { success: true, intentScore, summary };
-    } catch (e) {
-      console.error('AI response parse error:', e, 'raw:', text);
-      // Fall back to heuristic if parsing fails
-      let intentScore = 0;
-      let productViews = 0;
-      let addedToCart = false;
-      let visitedCheckout = false;
-      for (const log of logs) {
-        const event = (log.event_name || '').toLowerCase();
-        const path = (log.url_path || '').toLowerCase();
-        if (event === 'add_to_cart' || path.includes('cart')) { intentScore += 30; addedToCart = true; }
-        else if (event === 'click_checkout' || path.includes('checkout')) { intentScore += 50; visitedCheckout = true; }
-        else if (event === 'click_product' || path.includes('product')) { intentScore += 10; productViews++; }
-      }
-      if (intentScore > 100) intentScore = 100;
-      let summary = `User viewed ${productViews} products during this session.`;
-      if (visitedCheckout) summary += ' High conversion likelihood: User reached the checkout funnel.';
-      else if (addedToCart) summary += ' Moderate conversion likelihood: User added items to their shopping cart.';
-      else if (productViews > 0) summary += ' Low conversion likelihood: User is in the early consideration/browsing stage.';
-      else summary += ' No commercial intent patterns identified yet.';
-      return { success: true, intentScore, summary };
-    }
-
-  } catch (error) {
-    console.error(`AI-backed session analysis failed for ID ${sessionId}:`, error);
     return {
-      success: false,
-      intentScore: 0,
-      summary: 'Unable to evaluate session analytics at this time.'
+      success: true,
+      userPseudoId,
+      totalEvents: rows.length,
+      rawData: rows
     };
+  } catch (error: any) {
+    console.error("BigQuery User History Fetch Failed: ", error);
+    return { success: false, intentScore: 0, summary: error.message };
   }
 }

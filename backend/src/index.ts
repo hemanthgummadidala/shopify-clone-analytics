@@ -7,6 +7,7 @@ import productRoutes from './routes/products';
 import orderRoutes from './routes/orders';
 import adminRoutes from './routes/admin';
 import trackingRoutes from './routes/trackingRoute';
+import scoringEngineRoutes from './routes/scoringEngine';
 
 dotenv.config();
 
@@ -23,6 +24,7 @@ app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/analytics', trackingRoutes);
+app.use('/api/analytics', scoringEngineRoutes);
 
 // Base API Health Check Endpoint
 app.get('/', (req, res) => {
