@@ -47,7 +47,7 @@ export const ProductDetails: React.FC = () => {
         // Change this line to include /api right after API_BASE
        // Remove the extra /api since API_BASE already has it built-in!
        try {
-        const response = await fetch(`${API_BASE}/api/telemetry/track-action`, {
+        const response = await fetch(`${API_BASE}/tracking/track-action`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
