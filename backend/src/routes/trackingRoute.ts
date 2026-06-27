@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { pool } from '../db';
-import { analyzeUserSession, analyzeUserSessionWithAI, getIntentScoreForUser } from '../analyticsService';
+import { analyzeUserSession, analyzeUserSessionWithAI, getIntentScoreForUser, evaluateUserIntentForPopup } from '../analyticsService';
 
 const router = express.Router();
 
@@ -110,4 +110,20 @@ router.get('/user-popup-intent/:userId', async (req: Request, res: Response) => 
 });
 
 export default router;
+
+router.get('/user-popup-intent/:sessionId', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    if (!sessionId) {
+      return res.status(400).json({ error: "Session identity parameters are required" });
+    }
+
+    const payload = await evaluateUserIntentForPopup(sessionId);
+    return res.status(200).json(payload);
+  } catch (err) {
+    console.error("Failed to parse intent route:", err);
+    return res.status(500).json({ error: "Internal score parsing engine failure" });
+  }
+});
   

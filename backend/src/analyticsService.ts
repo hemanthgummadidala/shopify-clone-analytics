@@ -226,3 +226,68 @@ export async function getIntentScoreForUser(userPseudoId: string): Promise<any> 
     return { success: false, totalEvents: 0, rawData: [] };
   }
 }
+export interface PopupIntentResult {
+  title: string;
+  message: string;
+  promoCode: string | null;
+}
+
+export const evaluateUserIntentForPopup = async (sessionId: string): Promise<PopupIntentResult> => {
+  try {
+    const metrics = await resolveBigQueryMetrics(sessionId);
+
+    if (!metrics) {
+      return {
+        title: "Welcome to ShopifyClone!",
+        message: "Explore our premium, curated lifestyle essentials handpicked for modern living.",
+        promoCode: null
+      };
+    }
+
+    if (metrics.purchases > 0) {
+      return {
+        title: "Thank You For Your Loyalty!",
+        message: "As a valued customer, enjoy an exclusive 10% discount on any new arrivals today.",
+        promoCode: "LOYAL10"
+      };
+    }
+
+    if (metrics.cart_adds > 0 && metrics.purchases === 0) {
+      return {
+        title: "Finish Your Order!",
+        message: "We noticed you left premium items in your shopping cart. Complete your order now and take 15% off!",
+        promoCode: "CART15"
+      };
+    }
+
+    if (metrics.checkout_starts > 0 && metrics.purchases === 0) {
+      return {
+        title: "Unlock Free Shipping!",
+        message: "You were so close to checking out! Complete your session now and get priority shipping absolutely free.",
+        promoCode: "FREESHIP"
+      };
+    }
+
+    if (metrics.product_views > 4) {
+      return {
+        title: "Loving the Collection?",
+        message: "You've been eyeing our exclusive streetwear and gadgets. Claim a special $10 voucher before it sells out.",
+        promoCode: "ITEMS10"
+      };
+    }
+
+    return {
+      title: "Welcome Back to ShopifyClone!",
+      message: "Check out our newly refreshed catalog designed for utility and timeless aesthetics.",
+      promoCode: null
+    };
+
+  } catch (error) {
+    console.error("Popup intention scoring pipeline crashed:", error);
+    return {
+      title: "Welcome to ShopifyClone!",
+      message: "Discover modern tech accessories and premium lifestyle essentials.",
+      promoCode: null
+    };
+  }
+};
