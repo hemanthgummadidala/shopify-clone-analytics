@@ -3,7 +3,13 @@ import { Product } from '../types.js';
 import { ProductCard } from '../components/ProductCard.js';
 import { useRouter } from '../components/Router.js';
 import { API_BASE } from '../context/AuthContext.js';
-import { ArrowRight, HelpCircle, Layers, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { ArrowRight, HelpCircle, SlidersHorizontal, Sparkles, X } from 'lucide-react';
+
+interface PopupData {
+  title: string;
+  message: string;
+  promoCode: string | null;
+}
 
 export const Home: React.FC = () => {
   const { path, navigate } = useRouter();
@@ -11,11 +17,41 @@ export const Home: React.FC = () => {
   const [categories, setCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
+  
+  // Real-time BigQuery Popup State Parameters
+  const [showPopup, setShowPopup] = useState<boolean>(false);
+  const [popupContent, setPopupContent] = useState<PopupData | null>(null);
 
-  // Extract search and category from URL query
   const searchParams = new URLSearchParams(window.location.search);
   const searchQuery = searchParams.get('search') || '';
   const selectedCategory = searchParams.get('category') || 'All';
+
+  // Real-Time Analytics Intent Evaluation Trigger Hook
+  useEffect(() => {
+    const triggerPersonalizedPopup = async () => {
+      const hasSeenPopup = sessionStorage.getItem('shopify_popup_seen');
+      if (hasSeenPopup) return;
+
+      let gaSessionId = localStorage.getItem('ga_session_id');
+      if (!gaSessionId) {
+        gaSessionId = 'ga_sid_' + Math.floor(Math.random() * 10000000);
+        localStorage.setItem('ga_session_id', gaSessionId);
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/tracking/user-popup-intent/${gaSessionId}`);
+        if (res.ok) {
+          const data: PopupData = await res.json();
+          setPopupContent(data);
+          setShowPopup(true);
+        }
+      } catch (err) {
+        console.error("Could not fetch user intent profile payload:", err);
+      }
+    };
+
+    triggerPersonalizedPopup();
+  }, []);
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -68,8 +104,13 @@ export const Home: React.FC = () => {
     fetchProducts();
   }, [selectedCategory, searchQuery, path]);
 
+  const handleClosePopup = () => {
+    sessionStorage.setItem('shopify_popup_seen', 'true');
+    setShowPopup(false);
+  };
+
   return (
-    <div className="pb-20">
+    <div className="pb-20 relative">
       {/* Hero Section */}
       <section className="relative bg-[#0b0c10] text-white py-24 sm:py-32 px-4 sm:px-6 lg:px-8 rounded-b-[40px] overflow-hidden shadow-2xl">
         <div className="absolute inset-0 opacity-40 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-indigo-900/50 via-gray-900 to-black"></div>
@@ -104,8 +145,6 @@ export const Home: React.FC = () => {
 
       {/* Catalog & Filter Section */}
       <main id="catalog" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-16 sm:mt-24">
-        
-        {/* Category Filter Pills */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-gray-100 pb-6 mb-8 gap-4">
           <div>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900 tracking-tight">
@@ -143,7 +182,6 @@ export const Home: React.FC = () => {
           </div>
         </div>
 
-        {/* Loading Spinner */}
         {loading && (
           <div className="py-24 flex flex-col items-center justify-center space-y-4">
             <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-600/20 border-t-indigo-600"></div>
@@ -151,14 +189,12 @@ export const Home: React.FC = () => {
           </div>
         )}
 
-        {/* Error Alert */}
         {error && (
           <div className="p-6 bg-rose-50 text-rose-600 border border-rose-100 rounded-3xl text-center font-medium max-w-md mx-auto my-12">
             {error}
           </div>
         )}
 
-        {/* Empty Catalog View */}
         {!loading && !error && products.length === 0 && (
           <div className="text-center py-20 bg-gray-50 rounded-[30px] border border-dashed border-gray-200 max-w-xl mx-auto">
             <HelpCircle className="mx-auto h-12 w-12 text-gray-400 mb-4" />
@@ -175,7 +211,6 @@ export const Home: React.FC = () => {
           </div>
         )}
 
-        {/* Product Cards Grid */}
         {!loading && !error && products.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
             {products.map((product) => (
@@ -183,8 +218,47 @@ export const Home: React.FC = () => {
             ))}
           </div>
         )}
-
       </main>
+
+      {/* Real-time Dynamic Personalization Modal Container View */}
+      {showPopup && popupContent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="relative bg-white w-full max-w-md rounded-[32px] p-8 text-center shadow-2xl border border-gray-100">
+            
+            <button 
+              onClick={handleClosePopup}
+              className="absolute top-5 right-5 p-2 rounded-full bg-gray-50 text-gray-400 hover:text-gray-700 transition-all cursor-pointer"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mx-auto mb-5 text-indigo-600">
+              <Sparkles className="h-8 w-8 text-indigo-600" />
+            </div>
+            
+            <h3 className="text-2xl font-extrabold text-gray-900 tracking-tight mb-2">
+              {popupContent.title}
+            </h3>
+            
+            <p className="text-sm text-gray-500 leading-relaxed mb-6">
+              {popupContent.message}
+            </p>
+
+            {popupContent.promoCode && (
+              <div className="mb-6 p-4 border-2 border-dashed border-indigo-200 bg-indigo-50/50 rounded-2xl font-mono text-lg font-bold text-indigo-600 tracking-widest">
+                {popupContent.promoCode}
+              </div>
+            )}
+            
+            <button
+              onClick={handleClosePopup}
+              className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl transition-all cursor-pointer text-sm"
+            >
+              Start Exploring
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
